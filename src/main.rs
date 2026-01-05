@@ -1,11 +1,34 @@
 use sha2::{Digest, Sha256};
+use std::marker::PhantomData;
+
+// --- TRAIT DEFINITION ---
+
+/// A contract for types that can be turned into a cryptographic fingerprint.
+pub trait Hashable {
+    fn to_hash(&self) -> String;
+}
+
+// Implement the contract for String so we can use our existing data.
+impl Hashable for String {
+    fn to_hash(&self) -> String {
+        hash_data(self)
+    }
+}
+
+// --- CORE DATA STRUCTURE ---
 
 // The 'filing cabinet' that stores our tree levels.
 // layers[0] = the bottom (leaves)
 // layers[last] = the top (root)
-pub struct MerkleTree {
+#[derive(Debug)]
+
+pub struct MerkleTree<T: Hashable> {
     pub layers: Vec<Vec<String>>,
+    // Marker to link the tree to type T without storing T itself.
+    _marker: PhantomData<T>,
 }
+
+// --- HELPERS ---
 
 // Low-level helper: Turns any string into a 64-character unique fingerprint.
 fn hash_data(input: &str) -> String {
@@ -34,12 +57,21 @@ fn hash_pair(left: &str, right: &str) -> String {
     hash_data(&combined)
 }
 
-impl MerkleTree {
-    pub fn new(data: Vec<String>) -> Self {
+// --- IMPLEMENTATION ---
+
+impl<T: Hashable> MerkleTree<T> {
+    /// Creates a new Merkle Tree. Returns an Error if the data is empty.
+    pub fn new(data: Vec<T>) -> Result<Self, String> {
+        // Guard Clause: Prevent mathematical errors with empty inputs
+        if data.is_empty() {
+            return Err("Cannot create a Merkle Tree with no data.".to_string());
+        }
+
         // 1. Create the bottom layer (The Leaves/Wide part of the funnel)
         let mut first_layer = Vec::new();
         for item in data {
-            first_layer.push(hash_data(&item));
+            // Use the trait method here!
+            first_layer.push(item.to_hash());
         }
 
         let mut layers = Vec::new();
@@ -69,7 +101,10 @@ impl MerkleTree {
             layers.push(next_layer);
         }
 
-        MerkleTree { layers }
+        Ok(MerkleTree {
+            layers,
+            _marker: PhantomData,
+        })
     }
 
     pub fn root(&self) -> &str {
@@ -78,18 +113,29 @@ impl MerkleTree {
     }
 }
 
+// --- MAIN EXECUTION ---
+
 fn main() {
     let transactions = vec!["alice->bob:10".to_string(), "bob->charlie:5".to_string()];
 
-    let tree = MerkleTree::new(transactions);
-
-    println!("---------------------------------------");
-    println!("Merkle Root: {}", tree.root());
-    println!("Tree Depth:  {} levels", tree.layers.len());
-    println!("---------------------------------------");
-
-    //some fancy formating to visualize the tree, idk how to do it any other way yet
+    // Safely opening the "Result" box using a match statement
+    match MerkleTree::new(transactions) {
+        // Case 1: The box had a tree! We name it 'tree' and use it.
+        Ok(tree) => {
+            println!("---------------------------------------");
+            println!("Success! Merkle Root: {}", tree.root());
+            println!("Tree Depth:  {} levels", tree.layers.len());
+            println!("---------------------------------------");
+        }
+        // Case 2: The box had an error message.
+        Err(e) => {
+            println!("Failed to build tree: {}", e);
+        }
+    }
 }
+
+// --- TESTS ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,21 +143,30 @@ mod tests {
     #[test]
     fn test_merkle_root_consistency() {
         let data = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-        let tree1 = MerkleTree::new(data.clone());
-        let tree2 = MerkleTree::new(data);
-
-        // The root should always be the same for the same data
+        let tree1 = MerkleTree::new(data.clone()).unwrap();
+        let tree2 = MerkleTree::new(data).unwrap();
         assert_eq!(tree1.root(), tree2.root());
     }
 
     #[test]
     fn test_odd_leaves() {
         let data = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-        let tree = MerkleTree::new(data);
+        let tree = MerkleTree::new(data).unwrap();
         // 3 leaves should result in 3 levels:
         // Level 0: [H(A), H(B), H(C)]
         // Level 1: [H(AB), H(CC)]
         // Level 2: [H(ABCC)]
         assert_eq!(tree.layers.len(), 3);
+    }
+
+    #[test]
+    fn test_empty_data_fails() {
+        let data: Vec<String> = vec![];
+        let result = MerkleTree::new(data);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Cannot create a Merkle Tree with no data."
+        );
     }
 }
