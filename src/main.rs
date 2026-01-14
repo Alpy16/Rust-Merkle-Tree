@@ -1,8 +1,6 @@
 use sha2::{Digest, Sha256};
 use std::marker::PhantomData;
 
-// --- TRAIT DEFINITION ---
-
 /// A contract for types that can be turned into a cryptographic fingerprint.
 pub trait Hashable {
     fn to_hash(&self) -> String;
@@ -15,8 +13,6 @@ impl Hashable for String {
     }
 }
 
-// --- CORE DATA STRUCTURE ---
-
 // The 'filing cabinet' that stores our tree levels.
 // layers[0] = the bottom (leaves)
 // layers[last] = the top (root)
@@ -27,8 +23,6 @@ pub struct MerkleTree<T: Hashable> {
     // Marker to link the tree to type T without storing T itself.
     _marker: PhantomData<T>,
 }
-
-// --- HELPERS ---
 
 // Low-level helper: Turns any string into a 64-character unique fingerprint.
 fn hash_data(input: &str) -> String {
@@ -79,6 +73,8 @@ impl<T: Hashable> MerkleTree<T> {
 
         // its called a tree but we are building it the reverse way so i found it makes more sense as a "Funnel":
         // Keep creating new layers until the last layer has only 1 hash (the Root), so you start wide and go narrow
+        // another mental model that really made sense is you can also think of it as a road that goes from many lanes to a single lane
+        // and proofs are like the only viable route from your location to the destination (the root) mathematically, hence why its proof of inclusion
         while layers.last().unwrap().len() > 1 {
             let mut next_layer = Vec::new();
 
@@ -111,9 +107,38 @@ impl<T: Hashable> MerkleTree<T> {
         // The root is the last layers first (and only) element
         self.layers.last().unwrap().first().unwrap()
     }
-}
+    pub fn get_proof(&self, index: usize) -> Vec<String> {
+        let mut proof = Vec::new();
+        let mut current_idx = index;
 
-// --- MAIN EXECUTION ---
+        // We go down the funnel (up the tree, intuitive i know), stopping before the very last layer (the root)
+        // because the root doesn't have a sibling.
+        // Or by road analogy
+        // We followed the route and reached the destination
+        for layer in &self.layers[..self.layers.len() - 1] {
+            // Find the sibling's position (if the current index is Even +1, else Odd -1)
+            let sibling_idx = if current_idx % 2 == 0 {
+                current_idx + 1
+            } else {
+                current_idx - 1
+            };
+
+            // Safety Check: If the sibling is out of bounds, use self
+            let sibling_hash = if sibling_idx < layer.len() {
+                &layer[sibling_idx]
+            } else {
+                &layer[current_idx]
+            };
+
+            // 3. Store the "route" to the center
+            proof.push(sibling_hash.clone());
+
+            // 4. Move to the next floor (Integer division halves the index)
+            current_idx /= 2;
+        }
+        proof
+    }
+}
 
 fn main() {
     let transactions = vec!["alice->bob:10".to_string(), "bob->charlie:5".to_string()];
@@ -133,8 +158,6 @@ fn main() {
         }
     }
 }
-
-// --- TESTS ---
 
 #[cfg(test)]
 mod tests {
