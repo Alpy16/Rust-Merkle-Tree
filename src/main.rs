@@ -23,6 +23,11 @@ pub struct MerkleTree<T: Hashable> {
     // Marker to link the tree to type T without storing T itself.
     _marker: PhantomData<T>,
 }
+#[derive(Debug, Clone)]
+pub enum Side {
+    Left,
+    Right,
+}
 
 // Low-level helper: Turns any string into a 64-character unique fingerprint.
 fn hash_data(input: &str) -> String {
@@ -107,7 +112,7 @@ impl<T: Hashable> MerkleTree<T> {
         // The root is the last layers first (and only) element
         self.layers.last().unwrap().first().unwrap()
     }
-    pub fn get_proof(&self, index: usize) -> Vec<String> {
+    pub fn get_proof(&self, index: usize) -> Vec<(String, Side)> {
         let mut proof = Vec::new();
         let mut current_idx = index;
 
@@ -123,6 +128,13 @@ impl<T: Hashable> MerkleTree<T> {
                 current_idx - 1
             };
 
+            // Determine which side the sibling is on, basically the same thing as above
+            let side = if current_idx % 2 == 0 {
+                Side::Right
+            } else {
+                Side::Left
+            };
+
             // Safety Check: If the sibling is out of bounds, use self
             let sibling_hash = if sibling_idx < layer.len() {
                 &layer[sibling_idx]
@@ -131,13 +143,25 @@ impl<T: Hashable> MerkleTree<T> {
             };
 
             // 3. Store the "route" to the center
-            proof.push(sibling_hash.clone());
+            proof.push((sibling_hash.clone(), side));
 
             // 4. Move to the next floor (Integer division halves the index)
             current_idx /= 2;
         }
         proof
     }
+}
+pub fn verify_proof(leaf: &str, proof: &[(String, Side)], root: &str) -> bool {
+    let mut current_hash = hash_data(leaf);
+
+    for (sibling_hash, side) in proof {
+        current_hash = match side {
+            Side::Left => hash_pair(sibling_hash, &current_hash),
+            Side::Right => hash_pair(&current_hash, sibling_hash),
+        };
+    }
+
+    current_hash == root
 }
 
 fn main() {
